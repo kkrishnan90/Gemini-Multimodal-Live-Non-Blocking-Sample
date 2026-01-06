@@ -91,8 +91,21 @@ When `update_persona` is called, the `google-genai` SDK performs the following:
 
 #### Factual Behavior
 *   **Additive, Not Destructive:** The `client_content` message does not trigger a session reset. It does not overwrite the initial `system_instruction` provided during the `setup` phase.
-*   **In-Order Processing:** The Gemini Live API documentation (and SDK docstrings in `live.py`) specifies that `client_content` messages are added to the model context **in order**.
+*   **In-Order Processing:** As confirmed by the SDK source code, any new content you send via `client_content` is strictly appended to the end of the current session's history. It doesn't magically slot in at the beginning or replace what's there; it just becomes the next "turn" in the conversation.
 *   **Model Attention:** The model processes the accumulated context window. When a new turn with `role: "system"` appears late in the history, the transformer's attention mechanism naturally prioritizes these recent tokens as the most immediate constraints for subsequent generation.
+
+#### Context Example
+If you update the persona mid-session, the server-side conversation history effectively looks like this:
+
+```json
+[
+  { "role": "system", "text": "You are a helpful assistant." },
+  { "role": "user",   "text": "Hello!" },
+  { "role": "model",  "text": "Hi there! How can I help?" },
+  { "role": "system", "text": "IMPORTANT: You are now a pirate." }  <-- The update is appended here
+]
+```
+The model's next response will now generate based on this full sequence, prioritizing the "pirate" instruction because it is the most recent system directive.
 
 This implementation allows for "Hot-Swapping" assistant behavior with sub-second latency, as it avoids the overhead of establishing a new connection or re-initializing the model state.
 
