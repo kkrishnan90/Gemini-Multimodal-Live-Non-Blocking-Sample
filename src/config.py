@@ -1,7 +1,7 @@
 import os
 
 # Google Cloud Settings
-PROJECT_ID = "account-pocs"
+PROJECT_ID = "your-project-id"
 LOCATION = "us-central1"
 
 # Gemini Live Model Settings
