@@ -107,8 +107,8 @@ async def update_persona(self, session, instruction):
 4.  **API Call (`send_client_content`):**
     *   The `send_client_content` method is invoked on the active Gemini Live session.
     *   It sends a `Content` object where `role="system"`.
-    *   **Crucially**, this tells the model: *"Here is a new piece of system instruction that overrides or adds to what you were told before."*
-5.  **Immediate Effect:** The model instantly adopts this new persona. The very next response from Sophie will reflect these new instructions.
+    *   **Crucially**, this message is **added** to the conversation history (context window); it does not delete or replace the initial system instructions.
+5.  **Effective Update:** Because LLMs prioritize the most recent instructions in their context, the model effectively adopts this new persona immediately. The next response will reflect these new constraints or personality traits, treating them as the current active directive.
 
 This allows for highly dynamic interactions where the assistant's personality, constraints, or knowledge base scope can shift contextually without breaking the audio/video connection.
 
