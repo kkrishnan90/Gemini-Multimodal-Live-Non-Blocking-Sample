@@ -76,7 +76,7 @@ The frontend provides the user interface to interact with Sophie.
 
 One of the most powerful features of this demo is the ability to update "Sophie's" persona or system instructions dynamically *during* an active live session.
 
-### Technical Implementation: `client_content` & Session State
+### Technical Implementation: `send_client_content` & Session State
 
 The Gemini Multimodal Live API maintains the conversation state **server-side**. Unlike standard REST APIs where you must re-send history, the Live API accumulates context throughout the WebSocket session.
 
@@ -84,14 +84,14 @@ The Gemini Multimodal Live API maintains the conversation state **server-side**.
 
 When `update_persona` is called, the `google-genai` SDK performs the following:
 
-1.  **Message Serialization:** It packages the instruction into a `client_content` JSON object.
-2.  **WebSocket Transmission:** This object is sent over the active Bidi (bidirectional) stream to the Gemini server.
+1.  **Message Serialization:** It packages the instruction into a JSON object for the WebSocket.
+2.  **WebSocket Transmission:** The message is sent over the active Bidi (bidirectional) stream to the Gemini server using the `send_client_content` method.
 3.  **Context Append:** The API server receives this and **appends** the new `turns` to the existing session history.
 4.  **Role Processing:** By setting the `role` to `"system"`, the instruction is injected as a system-level directive within the chronological context.
 
 #### Factual Behavior
-*   **Additive, Not Destructive:** The `client_content` message does not trigger a session reset. It does not overwrite the initial `system_instruction` provided during the `setup` phase.
-*   **In-Order Processing:** As confirmed by the SDK source code, any new content you send via `client_content` is strictly appended to the end of the current session's history. It doesn't magically slot in at the beginning or replace what's there; it just becomes the next "turn" in the conversation.
+*   **Additive, Not Destructive:** The `send_client_content` message does not trigger a session reset. It does not overwrite the initial `system_instruction` provided during the `setup` phase.
+*   **In-Order Processing:** As confirmed by the SDK source code, any new content you send via `send_client_content` is strictly appended to the end of the current session's history. It doesn't magically slot in at the beginning or replace what's there; it just becomes the next "turn" in the conversation.
 *   **Model Attention:** The model processes the accumulated context window. When a new turn with `role: "system"` appears late in the history, the transformer's attention mechanism naturally prioritizes these recent tokens as the most immediate constraints for subsequent generation.
 
 #### Context Example
