@@ -76,41 +76,25 @@ The frontend provides the user interface to interact with Sophie.
 
 One of the most powerful features of this demo is the ability to update "Sophie's" persona or system instructions dynamically *during* an active live session.
 
-### The Logic (`send_client_content`)
+### Technical Implementation: `client_content` & Session State
 
-In a standard interaction, "System Instructions" are usually set once at the beginning of a session (in the `connect` config). However, the Gemini Live API allows you to inject new system-level instructions into the conversation history at any point using `client_content` messages.
+The Gemini Multimodal Live API maintains the conversation state **server-side**. Unlike standard REST APIs where you must re-send history, the Live API accumulates context throughout the WebSocket session.
 
-This is implemented in `src/client.py` within the `SophieLiveClient` class:
+#### The `send_client_content` Mechanism
 
-```python
-async def update_persona(self, session, instruction):
-    """Updates the system instruction dynamically."""
-    print(f"--- Sending Client Content (Update Persona): {instruction[:50]}... ---")
-    
-    # We construct a 'Content' object with the role set to "system".
-    # This effectively appends a new system turn to the conversation history.
-    await session.send_client_content(
-        turns=[types.Content(
-            role="system",
-            parts=[types.Part(text=instruction)]
-        )],
-        turn_complete=True
-    )
-    print("--- Persona Update Sent Successfully ---")
-```
+When `update_persona` is called, the `google-genai` SDK performs the following:
 
-### Flow of Events
+1.  **Message Serialization:** It packages the instruction into a `client_content` JSON object.
+2.  **WebSocket Transmission:** This object is sent over the active Bidi (bidirectional) stream to the Gemini server.
+3.  **Context Append:** The API server receives this and **appends** the new `turns` to the existing session history.
+4.  **Role Processing:** By setting the `role` to `"system"`, the instruction is injected as a system-level directive within the chronological context.
 
-1.  **User Action:** On the frontend, the user selects a new mode or updates a text field (e.g., "Be a sarcastic pirate").
-2.  **WebSocket Message:** The frontend sends this new instruction string to the Python backend via the established WebSocket.
-3.  **Backend Processing:** The backend receives the message and calls `client.update_persona(session, new_instruction)`.
-4.  **API Call (`send_client_content`):**
-    *   The `send_client_content` method is invoked on the active Gemini Live session.
-    *   It sends a `Content` object where `role="system"`.
-    *   **Crucially**, this message is **added** to the conversation history (context window); it does not delete or replace the initial system instructions.
-5.  **Effective Update:** Because LLMs prioritize the most recent instructions in their context, the model effectively adopts this new persona immediately. The next response will reflect these new constraints or personality traits, treating them as the current active directive.
+#### Factual Behavior
+*   **Additive, Not Destructive:** The `client_content` message does not trigger a session reset. It does not overwrite the initial `system_instruction` provided during the `setup` phase.
+*   **In-Order Processing:** The Gemini Live API documentation (and SDK docstrings in `live.py`) specifies that `client_content` messages are added to the model context **in order**.
+*   **Model Attention:** The model processes the accumulated context window. When a new turn with `role: "system"` appears late in the history, the transformer's attention mechanism naturally prioritizes these recent tokens as the most immediate constraints for subsequent generation.
 
-This allows for highly dynamic interactions where the assistant's personality, constraints, or knowledge base scope can shift contextually without breaking the audio/video connection.
+This implementation allows for "Hot-Swapping" assistant behavior with sub-second latency, as it avoids the overhead of establishing a new connection or re-initializing the model state.
 
 ---
 
