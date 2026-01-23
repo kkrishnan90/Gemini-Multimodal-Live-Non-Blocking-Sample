@@ -388,10 +388,10 @@ const App: React.FC = () => {
 
       {/* Settings Modal */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md mx-4 shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90vh] flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+            <div className="flex items-center justify-between p-4 border-b border-slate-700 shrink-0">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Settings size={20} className="text-indigo-400" />
                 Authentication Settings
@@ -405,7 +405,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
               {/* Auth Mode Toggle */}
               <div className="space-y-3">
                 <label className="text-sm font-medium text-slate-300">Authentication Mode</label>
@@ -555,7 +555,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex gap-3 p-4 border-t border-slate-700">
+            <div className="flex gap-3 p-4 border-t border-slate-700 shrink-0">
               <button
                 onClick={() => setShowSettings(false)}
                 className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium transition-colors"
