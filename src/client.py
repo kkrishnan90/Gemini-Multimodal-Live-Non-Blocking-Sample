@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from typing import Optional
 from google import genai
 from google.genai import types
 from src.tools import ToolHandler
 from src import config
 from src.config import AuthMode
+
+logger = logging.getLogger("sophie-client")
 
 
 class SophieLiveClient:
@@ -131,7 +134,39 @@ class SophieLiveClient:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
         )
-        
+
+        # Log session init payload
+        logger.info("=" * 60)
+        logger.info("SESSION INIT PAYLOAD")
+        logger.info("=" * 60)
+        logger.info(f"Auth Mode: {self.auth_mode.value}")
+        logger.info(f"Model ID: {self.model_id}")
+        if self.auth_mode == AuthMode.VERTEX_AI:
+            logger.info(f"Project ID: {self.project_id}")
+            logger.info(f"Location: {self.location}")
+        logger.info("-" * 60)
+        logger.info("LiveConnectConfig:")
+        logger.info(f"  response_modalities: {config_live.response_modalities}")
+        logger.info(f"  speech_config.voice_name: {config.LIVE_CONFIG['voice_name']}")
+        logger.info(f"  speech_config.language_code: {config.LIVE_CONFIG['language_code']}")
+        logger.info(f"  explicit_vad_signal: {config_live.explicit_vad_signal}")
+        logger.info(f"  realtime_input_config.automatic_activity_detection:")
+        logger.info(f"    silence_duration_ms: {config.LIVE_CONFIG['silence_duration_ms']}")
+        logger.info(f"    prefix_padding_ms: {config.LIVE_CONFIG['prefix_padding_ms']}")
+        logger.info(f"  proactivity.proactive_audio: {config.LIVE_CONFIG['proactive_audio']}")
+        logger.info(f"  input_audio_transcription: enabled")
+        logger.info(f"  output_audio_transcription: enabled")
+        logger.info("-" * 60)
+        logger.info("Tools:")
+        for tool in config_live.tools:
+            for func_decl in tool.function_declarations:
+                logger.info(f"  - {func_decl.name}")
+                if hasattr(func_decl, 'behavior') and func_decl.behavior:
+                    logger.info(f"    behavior: {func_decl.behavior}")
+        logger.info("-" * 60)
+        logger.info(f"System Instruction: {config.SYSTEM_INSTRUCTION[:100]}...")
+        logger.info("=" * 60)
+
         return self.client.aio.live.connect(
             model=self.model_id,
             config=config_live
