@@ -19,11 +19,20 @@ AUTH_MODE = AuthMode(os.getenv("AUTH_MODE", "VERTEX_AI"))
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # Vertex AI Configuration
-PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "account-pocs")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 # Gemini Live Model Settings
-MODEL_ID = os.getenv("MODEL_ID", "gemini-live-2.5-flash-native-audio")
+# AI Studio and Vertex AI use different model IDs
+MODEL_ID_AI_STUDIO = os.getenv(
+    "MODEL_ID_AI_STUDIO", "gemini-2.5-flash-native-audio-preview-12-2025"
+)
+MODEL_ID_VERTEX_AI = os.getenv(
+    "MODEL_ID_VERTEX_AI", "gemini-live-2.5-flash-native-audio"
+)
+
+# Legacy MODEL_ID for backward compatibility
+MODEL_ID = os.getenv("MODEL_ID", MODEL_ID_VERTEX_AI)
 
 # Audio Settings (PyAudio)
 AUDIO_FORMAT = 16  # paInt16

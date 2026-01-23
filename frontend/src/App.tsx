@@ -495,42 +495,42 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Function Call Configuration Preview */}
+              {/* Configuration Preview */}
               <div className="space-y-3">
-                <label className="text-sm font-medium text-slate-300">Function Call Configuration</label>
-                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${pendingAuthMode === 'AI_STUDIO' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                    <span className="text-xs font-medium text-slate-300">
-                      {pendingAuthMode === 'AI_STUDIO' ? 'Non-Blocking + Scheduling' : 'Async Execution'}
-                    </span>
+                <label className="text-sm font-medium text-slate-300">Configuration Preview</label>
+                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 space-y-4">
+                  {/* Model ID */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Model ID</span>
+                    <code className="block text-xs text-indigo-300 bg-slate-900/50 p-2 rounded-lg font-mono">
+                      {pendingAuthMode === 'AI_STUDIO'
+                        ? 'gemini-2.5-flash-native-audio-preview-12-2025'
+                        : 'gemini-live-2.5-flash-native-audio'}
+                    </code>
                   </div>
-                  <pre className="text-[10px] text-slate-400 bg-slate-900/50 p-3 rounded-lg overflow-x-auto font-mono leading-relaxed">
+
+                  {/* Function Call Config */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Function Calls</span>
+                      <div className={`w-1.5 h-1.5 rounded-full ${pendingAuthMode === 'AI_STUDIO' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                      <span className="text-[10px] text-slate-400">
+                        {pendingAuthMode === 'AI_STUDIO' ? 'Non-Blocking' : 'Standard'}
+                      </span>
+                    </div>
+                    <pre className="text-[10px] text-slate-400 bg-slate-900/50 p-2 rounded-lg overflow-x-auto font-mono leading-relaxed">
 {pendingAuthMode === 'AI_STUDIO'
-  ? `// Function Declaration
-{
-  "name": "google_search",
-  "description": "Performs a Google search.",
-  "parameters": { ... },
-  "behavior": "NON_BLOCKING"  ← AI Studio only
-}
+  ? `declaration: { ..., "behavior": "NON_BLOCKING" }
+response:    { ..., "scheduling": "INTERRUPT" }`
+  : `declaration: { ... }
+response:    { ... }`}
+                    </pre>
+                  </div>
 
-// Function Response
-{ "result": "...", "scheduling": "INTERRUPT" }`
-  : `// Function Declaration
-{
-  "name": "google_search",
-  "description": "Performs a Google search.",
-  "parameters": { ... }
-}
-
-// Function Response
-{ "result": "..." }`}
-                  </pre>
                   <p className="text-[10px] text-slate-500">
                     {pendingAuthMode === 'AI_STUDIO'
-                      ? 'AI Studio adds NON_BLOCKING behavior with scheduling: INTERRUPT, WHEN_IDLE, SILENT'
-                      : 'Vertex AI uses async execution without non-blocking behavior field'}
+                      ? 'AI Studio: NON_BLOCKING with scheduling (INTERRUPT, WHEN_IDLE, SILENT)'
+                      : 'Vertex AI: Standard async execution'}
                   </p>
                 </div>
               </div>
