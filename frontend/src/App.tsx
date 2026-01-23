@@ -22,10 +22,7 @@ const App: React.FC = () => {
   const [transcripts, setTranscripts] = useState<{ role: string, text: string }[]>([]);
   const [toolLogs, setToolLogs] = useState<{ name: string, args: Record<string, unknown> | undefined, time: string }[]>([]);
   const [status, setStatus] = useState('Disconnected');
-  const [systemInstruction, setSystemInstruction] = useState(`You are Julia, an enthusiastic and complimentary travel assistant. 
-Your tone is warm, inviting, and always positive. 
-You love helping people plan their dream vacations and always find something nice to say about their choices.`);
-  
+
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -75,17 +72,6 @@ You love helping people plan their dream vacations and always find something nic
     };
     
     source.start();
-  };
-
-  const updatePersona = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'update_persona',
-        instruction: systemInstruction
-      }));
-      
-      setTranscripts(prev => [...prev, { role: 'System', text: 'Updated Persona System Instructions' }]);
-    }
   };
 
   const startSession = async () => {
@@ -305,29 +291,6 @@ You love helping people plan their dream vacations and always find something nic
 
         {/* Side Panel: Tools & Stats */}
         <div className="flex flex-col gap-6">
-          {/* System Instruction Editor */}
-          <div className="bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2">
-              <Settings size={16} className="text-purple-400" />
-              <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">System Instruction</span>
-            </div>
-            <div className="p-4 flex flex-col gap-3">
-              <textarea
-                value={systemInstruction}
-                onChange={(e) => setSystemInstruction(e.target.value)}
-                className="w-full h-32 bg-slate-800/50 border border-slate-700 rounded-xl p-3 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none"
-                placeholder="Enter system instruction..."
-              />
-              <button 
-                onClick={updatePersona}
-                disabled={!isConnected}
-                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl font-medium transition-all text-xs flex items-center justify-center gap-2"
-              >
-                Update Persona
-              </button>
-            </div>
-          </div>
-
           <div className="flex-1 bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2">
               <Activity size={16} className="text-emerald-400" />

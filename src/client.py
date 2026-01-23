@@ -125,15 +125,3 @@ class SophieLiveClient:
             await session.send_tool_response(
                 function_responses=function_responses
             )
-
-    async def update_persona(self, session, instruction):
-        """Updates the system instruction dynamically."""
-        print(f"--- Sending Client Content (Update Persona): {instruction[:50]}... ---")
-        await session.send_client_content(
-            turns=[types.Content(
-                role="system",
-                parts=[types.Part(text=instruction)]
-            )],
-            turn_complete=True
-        )
-        print("--- Persona Update Sent Successfully ---")

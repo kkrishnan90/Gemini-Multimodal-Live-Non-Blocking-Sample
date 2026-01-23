@@ -53,17 +53,6 @@ async def live_proxy(websocket: WebSocket):
                                 data = json.loads(message["text"])
                                 if data.get("type") == "end":
                                     break
-                                elif data.get("type") == "update_persona":
-                                    instruction = data.get("instruction")
-                                    if instruction:
-                                        logger.info(f"Updating persona to: {instruction[:50]}...")
-                                        await client.update_persona(session, instruction)
-                                        # Send confirmation to frontend to display in Tool Executions
-                                        await websocket.send_json({
-                                            "type": "tool_call",
-                                            "name": "system_instruction_update",
-                                            "args": {"instruction": instruction[:100] + "..."}
-                                        })
                             except json.JSONDecodeError:
                                 pass
                 except Exception as e:
