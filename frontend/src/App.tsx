@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Mic, MicOff, Settings, Activity, Terminal, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Mic, MicOff, Settings, Activity, Terminal, CheckCircle2, AlertCircle, X, Key, Cloud } from 'lucide-react';
 
 interface Part {
   text?: string;
@@ -17,11 +17,29 @@ interface ServerMessage {
   output_transcription?: { text: string, finished: boolean };
 }
 
+interface AuthConfig {
+  auth_mode: 'AI_STUDIO' | 'VERTEX_AI';
+  project_id: string;
+  location: string;
+  has_api_key: boolean;
+}
+
+const API_BASE_URL = 'http://localhost:8000';
+
 const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [transcripts, setTranscripts] = useState<{ role: string, text: string }[]>([]);
   const [toolLogs, setToolLogs] = useState<{ name: string, args: Record<string, unknown> | undefined, time: string }[]>([]);
   const [status, setStatus] = useState('Disconnected');
+
+  // Settings modal state
+  const [showSettings, setShowSettings] = useState(false);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [pendingAuthMode, setPendingAuthMode] = useState<'AI_STUDIO' | 'VERTEX_AI'>('VERTEX_AI');
+  const [pendingApiKey, setPendingApiKey] = useState('');
+  const [pendingProjectId, setPendingProjectId] = useState('');
+  const [pendingLocation, setPendingLocation] = useState('us-central1');
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -38,6 +56,52 @@ const App: React.FC = () => {
       audioContextRef.current = new AudioContextClass({ sampleRate: 16000 });
     }
     return audioContextRef.current;
+  };
+
+  // Fetch auth config on mount
+  useEffect(() => {
+    fetchAuthConfig();
+  }, []);
+
+  const fetchAuthConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/config`);
+      if (response.ok) {
+        const config: AuthConfig = await response.json();
+        setAuthConfig(config);
+        setPendingAuthMode(config.auth_mode);
+        setPendingProjectId(config.project_id);
+        setPendingLocation(config.location);
+      }
+    } catch (error) {
+      console.error('Failed to fetch auth config:', error);
+    }
+  };
+
+  const saveAuthConfig = async () => {
+    setIsSavingConfig(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_mode: pendingAuthMode,
+          api_key: pendingAuthMode === 'AI_STUDIO' ? pendingApiKey : undefined,
+          project_id: pendingAuthMode === 'VERTEX_AI' ? pendingProjectId : undefined,
+          location: pendingAuthMode === 'VERTEX_AI' ? pendingLocation : undefined,
+        }),
+      });
+      if (response.ok) {
+        const config: AuthConfig = await response.json();
+        setAuthConfig(config);
+        setShowSettings(false);
+        setPendingApiKey(''); // Clear API key from memory after saving
+      }
+    } catch (error) {
+      console.error('Failed to save auth config:', error);
+    } finally {
+      setIsSavingConfig(false);
+    }
   };
 
   const processAudioQueue = async () => {
@@ -257,7 +321,11 @@ const App: React.FC = () => {
               <MicOff size={18} /> Stop Session
             </button>
           )}
-          <button className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="p-2 hover:bg-slate-800 rounded-full transition-colors text-slate-400"
+            title="Settings"
+          >
             <Settings size={20} />
           </button>
         </div>
@@ -317,6 +385,194 @@ const App: React.FC = () => {
           </div>
         </div>
       </main>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md mx-4 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Settings size={20} className="text-indigo-400" />
+                Authentication Settings
+              </h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="p-1 hover:bg-slate-700 rounded-lg transition-colors text-slate-400"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              {/* Auth Mode Toggle */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-300">Authentication Mode</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setPendingAuthMode('AI_STUDIO')}
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      pendingAuthMode === 'AI_STUDIO'
+                        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                        : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <Key size={24} />
+                    <span className="text-sm font-medium">AI Studio</span>
+                    <span className="text-[10px] text-slate-500">API Key</span>
+                  </button>
+                  <button
+                    onClick={() => setPendingAuthMode('VERTEX_AI')}
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      pendingAuthMode === 'VERTEX_AI'
+                        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                        : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <Cloud size={24} />
+                    <span className="text-sm font-medium">Vertex AI</span>
+                    <span className="text-[10px] text-slate-500">Google Cloud</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Conditional Fields */}
+              {pendingAuthMode === 'AI_STUDIO' ? (
+                <div className="space-y-3">
+                  <label className="text-sm font-medium text-slate-300">API Key</label>
+                  <input
+                    type="password"
+                    value={pendingApiKey}
+                    onChange={(e) => setPendingApiKey(e.target.value)}
+                    placeholder={authConfig?.has_api_key ? '••••••••••••••••' : 'Enter your API key'}
+                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                  <p className="text-xs text-slate-500">
+                    Get your API key from{' '}
+                    <a
+                      href="https://aistudio.google.com/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:underline"
+                    >
+                      aistudio.google.com/apikey
+                    </a>
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-300">Project ID</label>
+                    <input
+                      type="text"
+                      value={pendingProjectId}
+                      onChange={(e) => setPendingProjectId(e.target.value)}
+                      placeholder="your-project-id"
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-300">Location</label>
+                    <select
+                      value={pendingLocation}
+                      onChange={(e) => setPendingLocation(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                    >
+                      <option value="us-central1">us-central1</option>
+                      <option value="us-west1">us-west1</option>
+                      <option value="us-east1">us-east1</option>
+                      <option value="europe-west1">europe-west1</option>
+                      <option value="asia-northeast1">asia-northeast1</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Requires ADC configured:{' '}
+                    <code className="bg-slate-800 px-1.5 py-0.5 rounded text-indigo-300">
+                      gcloud auth application-default login
+                    </code>
+                  </p>
+                </div>
+              )}
+
+              {/* Function Call Configuration Preview */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-300">Function Call Configuration</label>
+                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${pendingAuthMode === 'AI_STUDIO' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                    <span className="text-xs font-medium text-slate-300">
+                      {pendingAuthMode === 'AI_STUDIO' ? 'Non-Blocking + Scheduling' : 'Async Execution'}
+                    </span>
+                  </div>
+                  <pre className="text-[10px] text-slate-400 bg-slate-900/50 p-3 rounded-lg overflow-x-auto font-mono leading-relaxed">
+{pendingAuthMode === 'AI_STUDIO'
+  ? `// Function Declaration
+{
+  "name": "google_search",
+  "description": "Performs a Google search.",
+  "parameters": { ... },
+  "behavior": "NON_BLOCKING"  ← AI Studio only
+}
+
+// Function Response
+{ "result": "...", "scheduling": "INTERRUPT" }`
+  : `// Function Declaration
+{
+  "name": "google_search",
+  "description": "Performs a Google search.",
+  "parameters": { ... }
+}
+
+// Function Response
+{ "result": "..." }`}
+                  </pre>
+                  <p className="text-[10px] text-slate-500">
+                    {pendingAuthMode === 'AI_STUDIO'
+                      ? 'AI Studio adds NON_BLOCKING behavior with scheduling: INTERRUPT, WHEN_IDLE, SILENT'
+                      : 'Vertex AI uses async execution without non-blocking behavior field'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Current Config Info */}
+              {authConfig && (
+                <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700">
+                  <p className="text-xs text-slate-400">
+                    <span className="font-medium text-slate-300">Current: </span>
+                    {authConfig.auth_mode === 'AI_STUDIO' ? (
+                      <span className="text-indigo-300">
+                        AI Studio {authConfig.has_api_key ? '(API key configured)' : '(no API key)'}
+                      </span>
+                    ) : (
+                      <span className="text-emerald-300">
+                        Vertex AI ({authConfig.project_id})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex gap-3 p-4 border-t border-slate-700">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveAuthConfig}
+                disabled={isSavingConfig}
+                className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingConfig ? 'Saving...' : 'Save Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
