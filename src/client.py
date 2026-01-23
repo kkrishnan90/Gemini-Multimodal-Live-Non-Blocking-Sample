@@ -3,169 +3,45 @@ from google import genai
 from google.genai import types
 from src.tools import ToolHandler
 from src import config
+from src.config import AuthMode
 
 class SophieLiveClient:
     """
     Client for interacting with the Gemini Multimodal Live API.
     Uses strictly google-genai SDK.
+    Supports both AI Studio (API key) and Vertex AI authentication.
     """
 
     def __init__(self):
-        self.client = genai.Client(
-            vertexai=True,
-            project=config.PROJECT_ID,
-            location=config.LOCATION
-        )
+        # Validate configuration before initializing
+        config.validate_config()
+
+        # Initialize client based on authentication mode
+        if config.AUTH_MODE == AuthMode.AI_STUDIO:
+            self.client = genai.Client(api_key=config.GOOGLE_API_KEY)
+        else:  # VERTEX_AI
+            self.client = genai.Client(
+                vertexai=True,
+                project=config.PROJECT_ID,
+                location=config.LOCATION
+            )
+
         self.model_id = config.MODEL_ID
         self.tool_handler = ToolHandler()
         
         # Map tool names to actual handler methods for execution
         self.tools_map = {
-            "close_camera": self.tool_handler.close_camera,
-            "take_photo": self.tool_handler.take_photo,
-            "start_video": self.tool_handler.start_video,
-            "stop_video": self.tool_handler.stop_video,
-            "stop_b": self.tool_handler.stop_b,
-            "start_observe_mode": self.tool_handler.start_observe_mode,
-            "stop_observe_mode": self.tool_handler.stop_observe_mode,
-            "start_translation_mode": self.tool_handler.start_translation_mode,
-            "start_meeting_mode": self.tool_handler.start_meeting_mode,
             "get_current_date_and_time": self.tool_handler.get_current_date_and_time,
-            "play_music": self.tool_handler.play_music,
-            "capture_frame": self.tool_handler.capture_frame,
-            "log_my_meal": self.tool_handler.log_my_meal,
-            "call_someone": self.tool_handler.call_someone,
-            "confirm_call": self.tool_handler.confirm_call,
-            "send_message": self.tool_handler.send_message,
-            "open_scanner": self.tool_handler.open_scanner,
             "google_search": self.tool_handler.google_search,
-            "search_nearby_places": self.tool_handler.search_nearby_places
         }
 
     def _get_tools_definitions(self):
         """Returns the list of tool definitions for the model using types.Tool."""
         function_declarations = [
             types.FunctionDeclaration(
-                name="close_camera",
-                description="Closes the camera.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="take_photo",
-                description="Takes a photo.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="start_video",
-                description="Starts recording video.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="stop_video",
-                description="Stops recording video.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="stop_b",
-                description="Ends the session.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="start_observe_mode",
-                description="Starts observe mode.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="stop_observe_mode",
-                description="Stops observe mode.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="start_translation_mode",
-                description="Starts translation mode.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="start_meeting_mode",
-                description="Starts meeting mode.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
                 name="get_current_date_and_time",
                 description="Gets the current date and time.",
                 parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="play_music",
-                description="Plays music.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "song_name": {"type": "string", "description": "The name of the song to play."}
-                    }
-                }
-            ),
-            types.FunctionDeclaration(
-                name="capture_frame",
-                description="Captures a frame for vision analysis.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "user_query": {"type": "string", "description": "The user's query about the scene."}
-                    },
-                    "required": ["user_query"]
-                }
-            ),
-            types.FunctionDeclaration(
-                name="log_my_meal",
-                description="Logs a meal.",
-                parameters={"type": "object", "properties": {}}
-            ),
-            types.FunctionDeclaration(
-                name="call_someone",
-                description="Initiates a phone call.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "The name of the person to call."},
-                        "phone_number": {"type": "string", "description": "The phone number to call."}
-                    }
-                }
-            ),
-            types.FunctionDeclaration(
-                name="confirm_call",
-                description="Confirms and places a phone call.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "The confirmed name."},
-                        "phone_number": {"type": "string", "description": "The confirmed phone number."}
-                    },
-                    "required": ["name", "phone_number"]
-                }
-            ),
-            types.FunctionDeclaration(
-                name="send_message",
-                description="Sends a message to a remote agent.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "agent_name": {"type": "string", "description": "The name of the agent."},
-                        "query": {"type": "string", "description": "The message/query."}
-                    },
-                    "required": ["agent_name", "query"]
-                }
-            ),
-            types.FunctionDeclaration(
-                name="open_scanner",
-                description="Opens the scanner for payment.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "amount": {"type": "string", "description": "The amount to scan."}
-                    },
-                    "required": ["amount"]
-                }
             ),
             types.FunctionDeclaration(
                 name="google_search",
@@ -178,17 +54,6 @@ class SophieLiveClient:
                     "required": ["query"]
                 }
             ),
-            types.FunctionDeclaration(
-                name="search_nearby_places",
-                description="Searches for nearby places.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The place to search for."}
-                    },
-                    "required": ["query"]
-                }
-            )
         ]
         return [types.Tool(function_declarations=function_declarations)]
 
@@ -242,13 +107,13 @@ class SophieLiveClient:
             handler = self.tools_map.get(name)
             if handler:
                 try:
-                    # Mock tools are synchronous in our implementation
-                    result = handler(**args)
+                    # Tools are async
+                    result = await handler(**args)
                     function_responses.append(
                         types.FunctionResponse(
                             name=name,
                             response=result,
-                            id=call_id # Include the ID
+                            id=call_id
                         )
                     )
                 except Exception as e:
