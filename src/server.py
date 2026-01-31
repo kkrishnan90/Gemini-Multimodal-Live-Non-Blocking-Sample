@@ -164,6 +164,9 @@ async def live_proxy(websocket: WebSocket):
             logger.info(f"Session started: {session_id}")
 
             audio_chunks_sent = 0
+            # Track recent tool calls to avoid duplicates
+            recent_tool_calls: dict[str, float] = {}  # key: "name:args_hash" -> timestamp
+            TOOL_DEDUP_WINDOW_SEC = 2.0  # Ignore duplicate calls within this window
 
             async def send_to_gemini():
                 """Forward audio from browser to Gemini."""
@@ -278,9 +281,27 @@ async def live_proxy(websocket: WebSocket):
                             # Handle Tool Calls - run in background to not block receive loop
                             if message.tool_call:
                                 from datetime import datetime
+                                import time
+                                import hashlib
+
                                 tool_name = message.tool_call.function_calls[0].name
                                 tool_args = message.tool_call.function_calls[0].args
                                 ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+                                # Create dedup key from tool name + args
+                                args_str = json.dumps(tool_args, sort_keys=True) if tool_args else ""
+                                dedup_key = f"{tool_name}:{hashlib.md5(args_str.encode()).hexdigest()[:8]}"
+                                current_time = time.time()
+
+                                # Check for duplicate call within window
+                                last_call_time = recent_tool_calls.get(dedup_key, 0)
+                                if current_time - last_call_time < TOOL_DEDUP_WINDOW_SEC:
+                                    logger.warning(f"[{ts}] [TOOL_SKIP] {tool_name}({tool_args}) - duplicate call within {TOOL_DEDUP_WINDOW_SEC}s, skipping")
+                                    continue
+
+                                # Record this call
+                                recent_tool_calls[dedup_key] = current_time
+
                                 logger.info(f"[{ts}] [TOOL_CALL] {tool_name}({tool_args}) - executing in background")
                                 await websocket.send_json({
                                     "type": "tool_call",
