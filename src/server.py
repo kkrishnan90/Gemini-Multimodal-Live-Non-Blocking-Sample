@@ -243,7 +243,9 @@ async def live_proxy(websocket: WebSocket):
 
                                 if message.server_content.turn_complete:
                                     response_payload["turn_complete"] = True
-                                    # logger.info("Turn complete received")
+                                    from datetime import datetime
+                                    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                                    logger.info(f"[{ts}] [TURN_COMPLETE] Model finished speaking")
 
                                 if message.server_content.interrupted:
                                     response_payload["interrupted"] = True

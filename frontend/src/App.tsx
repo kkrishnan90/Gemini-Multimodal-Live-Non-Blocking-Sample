@@ -33,12 +33,13 @@ const API_BASE_URL = 'http://localhost:8000';
 
 const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
-  const [transcripts, setTranscripts] = useState<{ role: string, text: string }[]>([]);
+  const [transcripts, setTranscripts] = useState<{ role: string, text: string, turnId: number }[]>([]);
   const [toolLogs, setToolLogs] = useState<{ name: string, args: Record<string, unknown> | undefined, time: string }[]>([]);
   const [status, setStatus] = useState('Disconnected');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [turnCompleteCount, setTurnCompleteCount] = useState(0);
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
@@ -56,6 +57,7 @@ const App: React.FC = () => {
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);  // Current playing source
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const toolLogsEndRef = useRef<HTMLDivElement>(null);
+  const turnIdRef = useRef(0);  // Track current turn for new bubbles on turn_complete
 
   // Initialize AudioContext only once - use native sample rate for proper mic capture
   const getAudioContext = () => {
@@ -271,54 +273,61 @@ const App: React.FC = () => {
         const data: ServerMessage = JSON.parse(event.data);
         
         if (data.type === 'server_content') {
-          const updateTranscript = (role: string, text: string) => {
+          const updateTranscript = (role: string, text: string, turnId: number) => {
             if (!text || !text.trim()) return;
             setTranscripts(prev => {
-              if (prev.length === 0) return [{ role, text }];
+              if (prev.length === 0) return [{ role, text, turnId }];
               const last = prev[prev.length - 1];
-              
-              if (last.role === role) {
+
+              // Same role AND same turn - merge text
+              if (last.role === role && last.turnId === turnId) {
                 // Check if the incoming text is a continuation/refinement
                 // User transcriptions are often cumulative, Sophie (parts) are additive fragments
                 if (text.startsWith(last.text)) {
                    // Cumulative update (already contains the previous text)
-                   return [...prev.slice(0, -1), { role, text }];
+                   return [...prev.slice(0, -1), { role, text, turnId }];
                 } else if (last.text.endsWith(text)) {
                    // Duplicate fragment at the end, ignore
                    return prev;
                 } else {
                    // Additive fragment
-                   return [...prev.slice(0, -1), { role, text: last.text + text }];
+                   return [...prev.slice(0, -1), { role, text: last.text + text, turnId }];
                 }
               }
-              // Role switch, start new bubble
-              return [...prev, { role, text }];
+              // Role switch OR new turn, start new bubble
+              return [...prev, { role, text, turnId }];
             });
           };
 
           if (data.parts) {
             data.parts.forEach(part => {
-              if (part.text) updateTranscript('Sophie', part.text);
+              if (part.text) updateTranscript('Sophie', part.text, turnIdRef.current);
               if (part.audio) playAudioBase64(part.audio);
             });
           }
-          
+
           if (data.input_transcription?.text) {
-             updateTranscript('User', data.input_transcription.text);
+             updateTranscript('User', data.input_transcription.text, turnIdRef.current);
           }
 
           if (data.output_transcription?.text) {
-             updateTranscript('Sophie', data.output_transcription.text);
+             updateTranscript('Sophie', data.output_transcription.text, turnIdRef.current);
           }
 
           if (data.interrupted) {
             // Clear all audio playback and reset state
             clearAudioPlayback();
             console.log('Audio interrupted by user speech');
+            // Increment turn on interruption so next response is a new bubble
+            turnIdRef.current += 1;
           }
 
           if (data.turn_complete) {
-            console.log('Turn complete');
+            const ts = new Date().toLocaleTimeString();
+            console.log(`[${ts}] Turn complete - Turn #${turnIdRef.current + 1}`);
+            // Increment turn ID so next messages start a new bubble
+            turnIdRef.current += 1;
+            setTurnCompleteCount(prev => prev + 1);
           }
         } else if (data.type === 'session_started') {
           console.log(`Session started: ${data.session_id}`);
@@ -374,6 +383,9 @@ const App: React.FC = () => {
     setIsConnected(false);
     setStatus('Disconnected');
     setSessionId(null);
+    // Reset turn tracking
+    turnIdRef.current = 0;
+    setTurnCompleteCount(0);
   };
 
   const playAudioBase64 = (base64Data: string) => {
@@ -473,21 +485,45 @@ const App: React.FC = () => {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transcription Area */}
         <div className="lg:col-span-2 flex flex-col bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden h-[calc(100vh-200px)]">
-          <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 shrink-0">
-            <Terminal size={16} className="text-indigo-400" />
-            <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">Live Transcript</span>
+          <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <Terminal size={16} className="text-indigo-400" />
+              <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">Live Transcript</span>
+            </div>
+            {turnCompleteCount > 0 && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                <span className="text-[10px] font-medium text-emerald-400">
+                  {turnCompleteCount} turn{turnCompleteCount !== 1 ? 's' : ''} completed
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex-1 p-6 overflow-y-auto flex flex-col gap-4">
-            {transcripts.map((t, i) => (
-              <div key={i} className={`flex flex-col ${t.role === 'User' ? 'items-end' : 'items-start'}`}>
-                <span className="text-[10px] uppercase font-bold text-slate-600 mb-1 ml-1">{t.role}</span>
-                <div className={`max-w-[80%] p-4 rounded-2xl ${
-                  t.role === 'User' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none'
-                }`}>
-                  {t.text}
-                </div>
-              </div>
-            ))}
+            {transcripts.map((t, i) => {
+              // Check if this is a new turn (different turnId from previous)
+              const isNewTurn = i > 0 && transcripts[i - 1].turnId !== t.turnId;
+
+              return (
+                <React.Fragment key={i}>
+                  {isNewTurn && (
+                    <div className="flex items-center gap-3 py-2">
+                      <div className="flex-1 h-px bg-slate-700" />
+                      <span className="text-[10px] text-slate-500 font-medium">Turn {t.turnId + 1}</span>
+                      <div className="flex-1 h-px bg-slate-700" />
+                    </div>
+                  )}
+                  <div className={`flex flex-col ${t.role === 'User' ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[10px] uppercase font-bold text-slate-600 mb-1 ml-1">{t.role}</span>
+                    <div className={`max-w-[80%] p-4 rounded-2xl ${
+                      t.role === 'User' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none'
+                    }`}>
+                      {t.text}
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
             {transcripts.length === 0 && (
               <div className="h-full flex items-center justify-center text-slate-600 italic">
                 Start the session and speak to see the transcript...
