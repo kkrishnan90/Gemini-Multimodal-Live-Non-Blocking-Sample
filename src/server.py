@@ -275,13 +275,13 @@ async def live_proxy(websocket: WebSocket):
 
                                 await websocket.send_json(response_payload)
 
-                            # Handle Tool Calls
+                            # Handle Tool Calls - run in background to not block receive loop
                             if message.tool_call:
                                 from datetime import datetime
                                 tool_name = message.tool_call.function_calls[0].name
                                 tool_args = message.tool_call.function_calls[0].args
                                 ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                                logger.info(f"[{ts}] [TOOL] {tool_name}({tool_args})")
+                                logger.info(f"[{ts}] [TOOL_CALL] {tool_name}({tool_args}) - executing in background")
                                 await websocket.send_json({
                                     "type": "tool_call",
                                     "name": tool_name,
@@ -292,10 +292,12 @@ async def live_proxy(websocket: WebSocket):
                                 await websocket.send_json({
                                     "type": "interim_response",
                                     "tool_name": tool_name,
-                                    "message": f"Sending interim response for {tool_name}..."
+                                    "message": f"Executing {tool_name} in background..."
                                 })
 
-                                await client.handle_tool_call(session, message.tool_call)
+                                # Run tool execution in background - does NOT block receive loop
+                                # This allows transcriptions to continue flowing while tool executes
+                                asyncio.create_task(client.handle_tool_call(session, message.tool_call))
 
                         # Brief sleep to allow other tasks to process
                         await asyncio.sleep(0.01)

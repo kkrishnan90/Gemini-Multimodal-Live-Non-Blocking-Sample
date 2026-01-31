@@ -266,10 +266,16 @@ class SophieLiveClient:
             # await session.send_tool_response(function_responses=[interim_response])
             # logger.info(f"Sent interim response for {name}")
 
-            # Execute tool
+            # Execute tool (runs in background via asyncio.create_task in server.py)
             try:
+                from datetime import datetime
+                start_ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                logger.info(f"[{start_ts}] [TOOL_START] {name} - executing...")
+
                 result = await handler(**args)
-                logger.info(f"Tool {name} completed with result: {result}")
+
+                end_ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                logger.info(f"[{end_ts}] [TOOL_DONE] {name} completed with result: {result}")
 
                 # Send result via send_tool_response
                 tool_response = types.FunctionResponse(
@@ -278,7 +284,7 @@ class SophieLiveClient:
                     id=call_id
                 )
                 await session.send_tool_response(function_responses=[tool_response])
-                logger.info(f"Sent tool response for {name}")
+                logger.info(f"[{end_ts}] [TOOL_RESPONSE] Sent response for {name}")
 
             except Exception as e:
                 logger.error(f"Error executing tool {name}: {e}")
