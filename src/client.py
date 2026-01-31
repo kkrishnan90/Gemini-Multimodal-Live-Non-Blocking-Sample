@@ -207,16 +207,28 @@ class SophieLiveClient:
 
         # Log session init payload as raw JSON
         logger.info("=" * 60)
-        logger.info("SESSION INIT PAYLOAD")
+        logger.info("SESSION INIT PAYLOAD (JSON)")
         logger.info("=" * 60)
         logger.info(f"Model: {self.model_id}")
         logger.info(f"Auth Mode: {self.auth_mode.value}")
-        # Log tools
-        tools = config_params.get("tools", [])
-        for tool in tools:
-            if hasattr(tool, 'function_declarations') and tool.function_declarations:
-                for fd in tool.function_declarations:
-                    logger.info(f"Tool registered: {fd.name} - {fd.description}")
+
+        # Convert config to JSON-serializable dict and log
+        try:
+            config_dict = config_live.model_dump(exclude_none=True)
+            # Remove system_instruction from log (too verbose)
+            if "system_instruction" in config_dict:
+                config_dict["system_instruction"] = "[TRUNCATED]"
+            # Format tools for readability
+            if "tools" in config_dict:
+                tool_names = []
+                for tool in config_dict.get("tools", []):
+                    if "function_declarations" in tool:
+                        for fd in tool["function_declarations"]:
+                            tool_names.append(fd.get("name", "unknown"))
+                config_dict["tools"] = f"[{len(tool_names)} tools: {', '.join(tool_names)}]"
+            logger.info(f"Config JSON:\n{json.dumps(config_dict, indent=2, default=str)}")
+        except Exception as e:
+            logger.warning(f"Failed to serialize config to JSON: {e}")
         logger.info("=" * 60)
 
         return self.client.aio.live.connect(
