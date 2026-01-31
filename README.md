@@ -1,129 +1,243 @@
-# Sophie Assistant - Gemini Multimodal Live API Demo
+# Gemini Multimodal Live Non-Blocking Sample
 
-This project demonstrates a real-time, multimodal AI assistant named "Sophie," built using the **Google Gemini Multimodal Live API**. It features a Python backend that handles the connection to Gemini and a React frontend for the user interface.
+A real-time multimodal AI assistant using the **Gemini Multimodal Live API** with support for **non-blocking function calls**. Features a Python/FastAPI backend with WebSocket streaming and a React/Vite frontend.
 
-## 🚀 Key Features
+## Project Structure
 
-*   **Real-time Multimodal Interaction:** Talk to Sophie using voice and video.
-*   **Dynamic Persona Updates:** Change Sophie's behavior and instructions on the fly without restarting the session.
-*   **Tool Use:** Sophie can execute defined tools (mocked in this demo) like "taking a photo," "searching Google," or "logging a meal."
-*   **Dual-Stack Architecture:** Python (FastAPI/WebSockets) backend + React (Vite) frontend.
-
----
-
-## 🛠️ Prerequisites
-
-*   **Python 3.10+**
-*   **Node.js 18+**
-*   **`uv`** (Python package manager): [Installation Guide](https://github.com/astral-sh/uv)
-*   **Google Cloud Project** with Vertex AI API enabled.
-*   **Application Default Credentials (ADC)** configured locally.
-
----
-
-## ⚙️ Setup & Installation
-
-### 1. Backend Setup
-
-The backend handles the WebSocket connection to the frontend and the secure connection to the Gemini Live API.
-
-1.  **Navigate to the project root:**
-    ```bash
-    cd /path/to/sophie-assistant
-    ```
-
-2.  **Install dependencies using `uv`:**
-    This will create a virtual environment (`.venv`) and install all required packages from `pyproject.toml`.
-    ```bash
-    uv sync
-    ```
-
-3.  **Start the Backend Server:**
-    You can use the provided helper script:
-    ```bash
-    ./start_backend.sh
-    ```
-    *Or run manually:*
-    ```bash
-    source .venv/bin/activate
-    python main.py
-    ```
-    The backend will run on `http://localhost:8000`.
-
-### 2. Frontend Setup
-
-The frontend provides the user interface to interact with Sophie.
-
-1.  **Navigate to the frontend directory:**
-    ```bash
-    cd frontend
-    ```
-
-2.  **Install Node dependencies:**
-    ```bash
-    npm install
-    ```
-
-3.  **Start the Development Server:**
-    ```bash
-    npm run dev
-    ```
-    The frontend will typically run on `http://localhost:5173`. Open this URL in your browser.
-
----
-
-## 🧠 How the Persona Update Works
-
-One of the most powerful features of this demo is the ability to update "Sophie's" persona or system instructions dynamically *during* an active live session.
-
-### Technical Implementation: `send_client_content` & Session State
-
-The Gemini Multimodal Live API maintains the conversation state **server-side**. Unlike standard REST APIs where you must re-send history, the Live API accumulates context throughout the WebSocket session.
-
-#### The `send_client_content` Mechanism
-
-When `update_persona` is called, the `google-genai` SDK performs the following:
-
-1.  **Message Serialization:** It packages the instruction into a JSON object for the WebSocket.
-2.  **WebSocket Transmission:** The message is sent over the active Bidi (bidirectional) stream to the Gemini server using the `send_client_content` method.
-3.  **Context Append:** The API server receives this and **appends** the new `turns` to the existing session history.
-4.  **Role Processing:** By setting the `role` to `"system"`, the instruction is injected as a system-level directive within the chronological context.
-
-#### Factual Behavior
-*   **Additive, Not Destructive:** The `send_client_content` message does not trigger a session reset. It does not overwrite the initial `system_instruction` provided during the `setup` phase.
-*   **In-Order Processing:** As confirmed by the SDK source code, any new content you send via `send_client_content` is strictly appended to the end of the current session's history. It doesn't magically slot in at the beginning or replace what's there; it just becomes the next "turn" in the conversation.
-*   **Model Attention:** The model processes the accumulated context window. When a new turn with `role: "system"` appears late in the history, the transformer's attention mechanism naturally prioritizes these recent tokens as the most immediate constraints for subsequent generation.
-
-#### Context Example
-If you update the persona mid-session, the server-side conversation history effectively looks like this:
-
-```json
-[
-  { "role": "system", "text": "You are a helpful assistant." },
-  { "role": "user",   "text": "Hello!" },
-  { "role": "model",  "text": "Hi there! How can I help?" },
-  { "role": "system", "text": "IMPORTANT: You are now a pirate." }  <-- The update is appended here
-]
 ```
-The model's next response will now generate based on this full sequence, prioritizing the "pirate" instruction because it is the most recent system directive.
+.
+├── src/                          # Backend Python source code
+│   ├── server.py                 # FastAPI WebSocket server (entry point)
+│   ├── client.py                 # Gemini Live API client wrapper
+│   ├── tools.py                  # Tool implementations (function handlers)
+│   ├── config.py                 # Configuration and environment variables
+│   ├── prompts.py                # System instruction / persona prompt
+│   └── auth.py                   # Authentication helpers
+│
+├── frontend/                     # React frontend
+│   ├── src/
+│   │   ├── App.tsx               # Main React component (WebSocket + Audio)
+│   │   └── main.tsx              # React entry point
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── tests/                        # Test files
+│   ├── test_tools.py             # Tool handler tests
+│   ├── test_client.py            # Client tests
+│   └── ...
+│
+├── start.sh                      # Script to start both backend and frontend
+├── pyproject.toml                # Python dependencies (uv)
+└── .env.example                  # Environment variable template
+```
 
-This implementation allows for "Hot-Swapping" assistant behavior with sub-second latency, as it avoids the overhead of establishing a new connection or re-initializing the model state.
+## Core Files Explained
+
+### Backend (`src/`)
+
+| File | Purpose |
+|------|---------|
+| `server.py` | FastAPI app with WebSocket endpoint `/ws/live`. Proxies audio between browser and Gemini. Handles auth config API (`/api/auth/config`). |
+| `client.py` | `SophieLiveClient` class - manages Gemini Live API connection, tool definitions, and tool call handling. |
+| `tools.py` | `ToolHandler` class - contains the actual tool implementations that get executed when Gemini calls a function. |
+| `config.py` | All configuration: auth mode, model IDs, audio settings, VAD parameters. Loads from `.env`. |
+| `prompts.py` | System instruction that defines the AI persona and tool usage rules. |
+
+### Frontend (`frontend/`)
+
+| File | Purpose |
+|------|---------|
+| `App.tsx` | Single-page React app handling microphone capture, WebSocket connection, audio playback, and UI. |
 
 ---
 
-## 📂 Project Structure
+## Tool Call Flow
 
-*   **`src/`**: Python backend source code.
-    *   `client.py`: Handles Gemini Live API connection and logic (including `update_persona`).
-    *   `server.py`: FastAPI server and WebSocket handling.
-    *   `tools.py`: Definitions of tools Sophie can use.
-    *   `config.py`: Configuration constants (Model ID, Project ID, etc.).
-*   **`frontend/`**: React application source code.
-*   **`main.py`**: Entry point for the backend application.
-*   **`conductor/`**: Project documentation and track management (internal use).
+This is how function calling works in this project:
 
-## 🐛 Troubleshooting
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              TOOL CALL FLOW                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-*   **Audio/Video Issues:** Ensure your browser has permission to access the microphone and camera.
-*   **Connection Errors:** Check that the backend is running and the port (8000) is not blocked.
-*   **Authentication:** Ensure you have the correct Google Cloud permissions and `GOOGLE_APPLICATION_CREDENTIALS` environment variable set if not using the default user login.
+1. TOOL DEFINITION (src/client.py:105-153)
+   └── _get_tools_definitions() creates FunctionDeclaration objects
+       └── Includes: name, description, parameters schema
+       └── For AI Studio: adds behavior: NON_BLOCKING
+
+2. SESSION SETUP (src/client.py:155-225)
+   └── connect() passes tools to LiveConnectConfig
+       └── Tools are registered with the Gemini model
+
+3. TOOL INVOCATION (src/server.py:277-296)
+   └── When Gemini calls a tool, server receives message.tool_call
+       └── Logs: [TOOL] tool_name(args)
+       └── Calls: client.handle_tool_call(session, message.tool_call)
+
+4. TOOL EXECUTION (src/client.py:227-273)
+   └── handle_tool_call() looks up handler in tools_map
+       └── tools_map maps "get_lucky_number" → tool_handler.get_lucky_number
+       └── Executes the async handler with args
+       └── Sends FunctionResponse back via session.send_tool_response()
+
+5. TOOL IMPLEMENTATION (src/tools.py)
+   └── ToolHandler class contains the actual functions:
+       └── get_current_date_and_time() - returns current date/time
+       └── get_lucky_number() - returns lucky number (10s delay to demo non-blocking)
+       └── action_trigger(issue_type) - routes issues
+```
+
+### Adding a New Tool
+
+1. **Define the handler** in `src/tools.py`:
+```python
+async def my_new_tool(self, param1: str) -> dict:
+    # Your implementation
+    return {"result": "value"}
+```
+
+2. **Add function declaration** in `src/client.py` → `_get_tools_definitions()`:
+```python
+{
+    "name": "my_new_tool",
+    "description": "What this tool does",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "param1": {"type": "string", "description": "Parameter description"}
+        },
+        "required": ["param1"]
+    }
+}
+```
+
+3. **Register in tools_map** in `src/client.py` → `__init__()`:
+```python
+self.tools_map = {
+    ...
+    "my_new_tool": self.tool_handler.my_new_tool,
+}
+```
+
+---
+
+## Non-Blocking Function Calls (AI Studio Only)
+
+When using AI Studio mode, function calls support **asynchronous execution**, allowing the model to continue speaking while waiting for tool results.
+
+### How It Works
+
+1. **Tool declarations** automatically include `behavior: NON_BLOCKING` (line 142-144 in `client.py`)
+
+2. **The model can speak** while the tool executes (e.g., "Let me check that for you...")
+
+3. **When the result arrives**, the model incorporates it naturally
+
+### Example: `get_lucky_number`
+
+This tool has a 10-second delay to demonstrate non-blocking behavior:
+- User: "Give me a lucky number"
+- Model: Calls `get_lucky_number`, continues talking
+- (10 seconds later) Tool returns result
+- Model: "Your lucky number is 42!"
+
+> **Note**: Non-blocking is NOT supported on Vertex AI.
+
+---
+
+## Authentication Modes
+
+| Mode | Configuration | Use Case |
+|------|---------------|----------|
+| `AI_STUDIO` | `GOOGLE_API_KEY` env var | Development, prototyping, non-blocking support |
+| `VERTEX_AI` | ADC + `GOOGLE_CLOUD_PROJECT` | Production, enterprise |
+
+Set via `AUTH_MODE` environment variable or runtime API.
+
+---
+
+## Quick Start
+
+### 1. Install Dependencies
+
+```bash
+# Backend (Python)
+uv sync
+
+# Frontend (Node.js)
+cd frontend && npm install
+```
+
+### 2. Configure Environment
+
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+**For AI Studio:**
+```env
+AUTH_MODE=AI_STUDIO
+GOOGLE_API_KEY=your-api-key-here
+```
+
+**For Vertex AI:**
+```env
+AUTH_MODE=VERTEX_AI
+GOOGLE_CLOUD_PROJECT=your-project-id
+```
+
+### 3. Run
+
+```bash
+# Start both backend and frontend
+./start.sh
+
+# Or separately:
+# Backend: uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+# Frontend: cd frontend && npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+---
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_MODE` | `VERTEX_AI` | `AI_STUDIO` or `VERTEX_AI` |
+| `GOOGLE_API_KEY` | - | API key for AI Studio mode |
+| `GOOGLE_CLOUD_PROJECT` | - | GCP project for Vertex AI |
+| `MODEL_ID_AI_STUDIO` | `gemini-2.5-flash-native-audio-preview-12-2025` | Model for AI Studio |
+| `MODEL_ID_VERTEX_AI` | `gemini-live-2.5-flash-preview-native-audio-09-2025` | Model for Vertex AI |
+| `VOICE_NAME` | `Kore` | TTS voice name |
+| `SILENCE_DURATION_MS` | `600` | Silence before end-of-speech |
+| `BARGE_IN` | `true` | Allow user interruption |
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ws/live` | WebSocket | Main audio streaming endpoint |
+| `/api/auth/config` | GET | Get current auth configuration |
+| `/api/auth/config` | POST | Update auth configuration |
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+source .venv/bin/activate && pytest
+
+# Run specific test
+pytest tests/test_tools.py
+
+# With coverage
+pytest --cov=src
+```

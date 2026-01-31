@@ -26,5 +26,6 @@ brain/
 .env
 vital-octagon-key.json
 
-# Markdown files
+# Markdown files (except README)
 *.md
+!README.md
