@@ -6,12 +6,18 @@ from dotenv import load_dotenv
 # Use override=True to ensure local .env values take precedence over system env vars
 load_dotenv(override=True)
 
-# Vertex AI API endpoint (autopush sandbox)
+# Vertex AI API endpoint
 # Format: {location}-{endpoint} for WebSocket connections
+# Production endpoint:
 VERTEX_API_ENDPOINT = os.getenv(
     "VERTEX_API_ENDPOINT",
-    "us-central1-autopush-aiplatform.sandbox.googleapis.com"
+    "us-central1-aiplatform.googleapis.com"
 )
+# Autopush sandbox (commented out):
+# VERTEX_API_ENDPOINT = os.getenv(
+#     "VERTEX_API_ENDPOINT",
+#     "us-central1-autopush-aiplatform.sandbox.googleapis.com"
+# )
 
 
 class AuthMode(str, Enum):
