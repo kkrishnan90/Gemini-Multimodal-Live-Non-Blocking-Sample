@@ -254,17 +254,19 @@ class SophieLiveClient:
                 logger.warning(f"Tool {name} not found in map.")
                 continue
 
-            # # Interim response (commented out)
-            # interim_response = types.FunctionResponse(
-            #     name=name,
-            #     response={
-            #         "status": "PROCESSING",
-            #         "message": "Say exactly 'Let me check that for you' and wait for the result."
-            #     },
-            #     id=call_id
-            # )
-            # await session.send_tool_response(function_responses=[interim_response])
-            # logger.info(f"Sent interim response for {name}")
+            # Send interim response to let model acknowledge the request
+            from datetime import datetime
+            interim_ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            interim_response = types.FunctionResponse(
+                name=name,
+                response={
+                    "status": "PROCESSING",
+                    "message": "I'm working on it. Please wait a moment."
+                },
+                id=call_id
+            )
+            await session.send_tool_response(function_responses=[interim_response])
+            logger.info(f"[{interim_ts}] [TOOL_INTERIM] Sent interim response for {name}")
 
             # Execute tool (runs in background via asyncio.create_task in server.py)
             try:
