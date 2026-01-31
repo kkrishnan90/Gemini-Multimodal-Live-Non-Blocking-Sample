@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Settings, Activity, Terminal, CheckCircle2, AlertCircle, X, Key, Cloud } from 'lucide-react';
+import { Mic, MicOff, Settings, Activity, Terminal, CheckCircle2, AlertCircle, X, Key, Cloud, Copy, Check } from 'lucide-react';
 
 interface Part {
   text?: string;
@@ -13,8 +13,13 @@ interface ServerMessage {
   args?: Record<string, unknown>;
   error?: string;
   interrupted?: boolean;
+  turn_complete?: boolean;
   input_transcription?: { text: string, finished: boolean };
   output_transcription?: { text: string, finished: boolean };
+  status?: string;
+  message?: string;
+  session_id?: string;
+  tool_name?: string;
 }
 
 interface AuthConfig {
@@ -31,14 +36,14 @@ const App: React.FC = () => {
   const [transcripts, setTranscripts] = useState<{ role: string, text: string }[]>([]);
   const [toolLogs, setToolLogs] = useState<{ name: string, args: Record<string, unknown> | undefined, time: string }[]>([]);
   const [status, setStatus] = useState('Disconnected');
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [copiedSessionId, setCopiedSessionId] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Settings modal state
   const [showSettings, setShowSettings] = useState(false);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [pendingAuthMode, setPendingAuthMode] = useState<'AI_STUDIO' | 'VERTEX_AI'>('VERTEX_AI');
-  const [pendingApiKey, setPendingApiKey] = useState('');
-  const [pendingProjectId, setPendingProjectId] = useState('');
-  const [pendingLocation, setPendingLocation] = useState('us-central1');
   const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -47,21 +52,56 @@ const App: React.FC = () => {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const isAiSpeakingRef = useRef(false);
   const audioQueueRef = useRef<Float32Array[]>([]);
-  const isPlayingRef = useRef(false);
+  const isPlayingRef = useRef(false);  // True when actively playing through queue
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);  // Current playing source
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const toolLogsEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize AudioContext only once
+  // Initialize AudioContext only once - use native sample rate for proper mic capture
   const getAudioContext = () => {
     if (!audioContextRef.current) {
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      audioContextRef.current = new AudioContextClass({ sampleRate: 16000 });
+      // Use default sample rate (usually 44100 or 48000) - we'll resample to 16kHz manually
+      audioContextRef.current = new AudioContextClass();
     }
     return audioContextRef.current;
+  };
+
+  // Resample audio from source sample rate to 16kHz using linear interpolation
+  const resampleTo16kHz = (inputData: Float32Array, inputSampleRate: number): Int16Array => {
+    const ratio = inputSampleRate / 16000;
+    const outputLength = Math.floor(inputData.length / ratio);
+    const int16Data = new Int16Array(outputLength);
+
+    for (let i = 0; i < outputLength; i++) {
+      const srcIndexFloat = i * ratio;
+      const srcIndex = Math.floor(srcIndexFloat);
+      const nextIndex = Math.min(srcIndex + 1, inputData.length - 1);
+      const frac = srcIndexFloat - srcIndex;
+
+      // Linear interpolation for better quality
+      const sample = inputData[srcIndex] * (1 - frac) + inputData[nextIndex] * frac;
+      const clampedSample = Math.max(-1, Math.min(1, sample));
+      int16Data[i] = clampedSample * 0x7FFF;
+    }
+
+    return int16Data;
   };
 
   // Fetch auth config on mount
   useEffect(() => {
     fetchAuthConfig();
   }, []);
+
+  // Auto-scroll transcripts to bottom when new messages arrive
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [transcripts]);
+
+  // Auto-scroll tool logs to bottom when new logs arrive
+  useEffect(() => {
+    toolLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [toolLogs]);
 
   const fetchAuthConfig = async () => {
     try {
@@ -70,8 +110,6 @@ const App: React.FC = () => {
         const config: AuthConfig = await response.json();
         setAuthConfig(config);
         setPendingAuthMode(config.auth_mode);
-        setPendingProjectId(config.project_id);
-        setPendingLocation(config.location);
       }
     } catch (error) {
       console.error('Failed to fetch auth config:', error);
@@ -86,16 +124,12 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           auth_mode: pendingAuthMode,
-          api_key: pendingAuthMode === 'AI_STUDIO' ? pendingApiKey : undefined,
-          project_id: pendingAuthMode === 'VERTEX_AI' ? pendingProjectId : undefined,
-          location: pendingAuthMode === 'VERTEX_AI' ? pendingLocation : undefined,
         }),
       });
       if (response.ok) {
         const config: AuthConfig = await response.json();
         setAuthConfig(config);
         setShowSettings(false);
-        setPendingApiKey(''); // Clear API key from memory after saving
       }
     } catch (error) {
       console.error('Failed to save auth config:', error);
@@ -104,14 +138,41 @@ const App: React.FC = () => {
     }
   };
 
-  const processAudioQueue = async () => {
-    if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
+  // Clear all pending and playing audio - used for interruptions
+  const clearAudioPlayback = () => {
+    // Stop current source if playing
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch {
+        // Ignore errors if already stopped
+      }
+      currentSourceRef.current = null;
+    }
 
-    isPlayingRef.current = true;
-    isAiSpeakingRef.current = true;
+    // Clear the queue
+    audioQueueRef.current = [];
+
+    // Reset flags
+    isPlayingRef.current = false;
+    isAiSpeakingRef.current = false;
+
+    console.log('Audio playback cleared');
+  };
+
+  // Play the next chunk from the queue sequentially
+  const playNextChunk = () => {
+    // If nothing in queue, we're done
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      isAiSpeakingRef.current = false;
+      currentSourceRef.current = null;
+      return;
+    }
+
     const context = getAudioContext();
-    
-    // Get next chunk
+
+    // Get next chunk - Gemini Live outputs at 24kHz
     const float32Array = audioQueueRef.current.shift()!;
     const buffer = context.createBuffer(1, float32Array.length, 24000);
     buffer.getChannelData(0).set(float32Array);
@@ -119,23 +180,36 @@ const App: React.FC = () => {
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
-    
+
+    currentSourceRef.current = source;
+
+    // When this chunk ends, play the next one
     source.onended = () => {
-      isPlayingRef.current = false;
-      // Process next chunk immediately if available
-      if (audioQueueRef.current.length > 0) {
-        processAudioQueue();
-      } else {
-        // Small delay to ensure "speaking" state clears after final chunk
-        setTimeout(() => {
-           if (audioQueueRef.current.length === 0) {
-             isAiSpeakingRef.current = false;
-           }
-        }, 100);
-      }
+      currentSourceRef.current = null;
+      // Play next chunk (if any)
+      playNextChunk();
     };
-    
-    source.start();
+
+    // Start immediately
+    source.start(0);
+  };
+
+  // Add audio to queue and start playing if not already
+  const processAudioQueue = () => {
+    // If already playing, the onended handler will pick up new chunks
+    if (isPlayingRef.current) {
+      return;
+    }
+
+    // Nothing to play
+    if (audioQueueRef.current.length === 0) {
+      return;
+    }
+
+    // Start playing
+    isPlayingRef.current = true;
+    isAiSpeakingRef.current = true;
+    playNextChunk();
   };
 
   const startSession = async () => {
@@ -155,25 +229,36 @@ const App: React.FC = () => {
         
         // Start microphone
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: { ideal: 48000 },
+              channelCount: 1
+            }
+          });
           mediaStreamRef.current = stream;
           
           const source = context.createMediaStreamSource(stream);
-          const processor = context.createScriptProcessor(512, 1, 1);
+          // Buffer size 2048 at 48kHz = ~42ms chunks - good balance of latency and quality
+          const processor = context.createScriptProcessor(2048, 1, 1);
           processorRef.current = processor;
-          
+
+          const inputSampleRate = context.sampleRate;
+          console.log(`Audio context sample rate: ${inputSampleRate}Hz, buffer will resample to 16kHz`);
+
           processor.onaudioprocess = (e) => {
-            if (ws.readyState === WebSocket.OPEN && !isAiSpeakingRef.current) {
+            // Always send audio to server for VAD - even while AI is speaking
+            // This enables barge-in/interruption functionality
+            if (ws.readyState === WebSocket.OPEN) {
               const inputData = e.inputBuffer.getChannelData(0);
-              // Convert Float32 to Int16
-              const int16Data = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                int16Data[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-              }
+              // Resample from native rate (e.g., 44100/48000) to 16kHz and convert to Int16
+              const int16Data = resampleTo16kHz(inputData, inputSampleRate);
               ws.send(int16Data.buffer);
             }
           };
-          
+
           source.connect(processor);
           processor.connect(context.destination);
         } catch (err) {
@@ -227,10 +312,23 @@ const App: React.FC = () => {
           }
 
           if (data.interrupted) {
-            audioQueueRef.current = [];
-            isAiSpeakingRef.current = false;
+            // Clear all audio playback and reset state
+            clearAudioPlayback();
+            console.log('Audio interrupted by user speech');
           }
+
+          if (data.turn_complete) {
+            console.log('Turn complete');
+          }
+        } else if (data.type === 'session_started') {
+          console.log(`Session started: ${data.session_id}`);
+          setSessionId(data.session_id || null);
+        } else if (data.type === 'interim_response') {
+          console.log(`Interim response: ${data.message}`);
+          setToast(data.message || `Processing ${data.tool_name}...`);
+          setTimeout(() => setToast(null), 3000);
         } else if (data.type === 'tool_call') {
+          console.log(`Tool call: ${data.name}`);
           setToolLogs(prev => [{
             name: data.name!,
             args: data.args,
@@ -241,8 +339,14 @@ const App: React.FC = () => {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log(`WebSocket closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`);
         stopSession();
+      };
+
+      ws.onerror = (event) => {
+        console.error('WebSocket error:', event);
+        setStatus('WebSocket Error');
       };
 
     } catch (err) {
@@ -252,6 +356,9 @@ const App: React.FC = () => {
   };
 
   const stopSession = () => {
+    // Clear all audio playback first
+    clearAudioPlayback();
+
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -266,6 +373,7 @@ const App: React.FC = () => {
     }
     setIsConnected(false);
     setStatus('Disconnected');
+    setSessionId(null);
   };
 
   const playAudioBase64 = (base64Data: string) => {
@@ -303,18 +411,49 @@ const App: React.FC = () => {
               {isConnected ? <CheckCircle2 size={12} className="text-emerald-500" /> : <AlertCircle size={12} />}
               {status}
             </p>
+            {sessionId && (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-slate-600 font-mono">Session: {sessionId}</span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(sessionId);
+                    setCopiedSessionId(true);
+                    setTimeout(() => setCopiedSessionId(false), 2000);
+                  }}
+                  className="p-0.5 hover:bg-slate-800 rounded transition-colors"
+                  title="Copy session ID"
+                >
+                  {copiedSessionId ? (
+                    <Check size={10} className="text-emerald-400" />
+                  ) : (
+                    <Copy size={10} className="text-slate-500" />
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Auth mode indicator */}
+          {authConfig && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+              authConfig.auth_mode === 'AI_STUDIO'
+                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+            }`}>
+              {authConfig.auth_mode === 'AI_STUDIO' ? <Key size={12} /> : <Cloud size={12} />}
+              {authConfig.auth_mode === 'AI_STUDIO' ? 'AI Studio' : 'Vertex AI'}
+            </div>
+          )}
           {!isConnected ? (
-            <button 
+            <button
               onClick={startSession}
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-full font-medium transition-all flex items-center gap-2"
             >
               <Mic size={18} /> Start Session
             </button>
           ) : (
-            <button 
+            <button
               onClick={stopSession}
               className="bg-rose-600 hover:bg-rose-500 text-white px-6 py-2 rounded-full font-medium transition-all flex items-center gap-2"
             >
@@ -333,8 +472,8 @@ const App: React.FC = () => {
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Transcription Area */}
-        <div className="lg:col-span-2 flex flex-col bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden">
-          <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2">
+        <div className="lg:col-span-2 flex flex-col bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden h-[calc(100vh-200px)]">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 shrink-0">
             <Terminal size={16} className="text-indigo-400" />
             <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">Live Transcript</span>
           </div>
@@ -354,13 +493,14 @@ const App: React.FC = () => {
                 Start the session and speak to see the transcript...
               </div>
             )}
+            <div ref={transcriptEndRef} />
           </div>
         </div>
 
         {/* Side Panel: Tools & Stats */}
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 h-[calc(100vh-200px)]">
           <div className="flex-1 bg-slate-900/30 rounded-3xl border border-slate-800 overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2">
+            <div className="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 shrink-0">
               <Activity size={16} className="text-emerald-400" />
               <span className="text-sm font-semibold uppercase tracking-wider text-slate-400">Tool Executions</span>
             </div>
@@ -381,6 +521,7 @@ const App: React.FC = () => {
                   Active tools used by Sophie will appear here...
                 </div>
               )}
+              <div ref={toolLogsEndRef} />
             </div>
           </div>
         </div>
@@ -437,63 +578,27 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Conditional Fields */}
-              {pendingAuthMode === 'AI_STUDIO' ? (
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-300">API Key</label>
-                  <input
-                    type="password"
-                    value={pendingApiKey}
-                    onChange={(e) => setPendingApiKey(e.target.value)}
-                    placeholder={authConfig?.has_api_key ? '••••••••••••••••' : 'Enter your API key'}
-                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                  />
-                  <p className="text-xs text-slate-500">
-                    Get your API key from{' '}
-                    <a
-                      href="https://aistudio.google.com/apikey"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-indigo-400 hover:underline"
-                    >
-                      aistudio.google.com/apikey
-                    </a>
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-slate-300">Project ID</label>
-                    <input
-                      type="text"
-                      value={pendingProjectId}
-                      onChange={(e) => setPendingProjectId(e.target.value)}
-                      placeholder="your-project-id"
-                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <label className="text-sm font-medium text-slate-300">Location</label>
-                    <select
-                      value={pendingLocation}
-                      onChange={(e) => setPendingLocation(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                    >
-                      <option value="us-central1">us-central1</option>
-                      <option value="us-west1">us-west1</option>
-                      <option value="us-east1">us-east1</option>
-                      <option value="europe-west1">europe-west1</option>
-                      <option value="asia-northeast1">asia-northeast1</option>
-                    </select>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    Requires ADC configured:{' '}
-                    <code className="bg-slate-800 px-1.5 py-0.5 rounded text-indigo-300">
-                      gcloud auth application-default login
-                    </code>
-                  </p>
-                </div>
-              )}
+              {/* Configuration info */}
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-xs text-slate-400">
+                  {pendingAuthMode === 'AI_STUDIO' ? (
+                    <>
+                      Using API key from <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">.env</code> file
+                      {authConfig?.has_api_key && (
+                        <span className="ml-2 text-green-400">✓ Configured</span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      Using Application Default Credentials (ADC).
+                      <br />
+                      <span className="text-slate-500">
+                        Run: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">gcloud auth application-default login</code>
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
 
               {/* Configuration Preview */}
               <div className="space-y-3">
@@ -505,7 +610,7 @@ const App: React.FC = () => {
                     <code className="block text-xs text-indigo-300 bg-slate-900/50 p-2 rounded-lg font-mono">
                       {pendingAuthMode === 'AI_STUDIO'
                         ? 'gemini-2.5-flash-native-audio-preview-12-2025'
-                        : 'gemini-live-2.5-flash-native-audio'}
+                        : 'gemini-live-2.5-flash-preview-native-audio-09-2025'}
                     </code>
                   </div>
 
@@ -571,6 +676,14 @@ response:    { ... }`}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-4 py-2 rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-300 flex items-center gap-2">
+          <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+          <span className="text-sm font-medium">{toast}</span>
         </div>
       )}
     </div>

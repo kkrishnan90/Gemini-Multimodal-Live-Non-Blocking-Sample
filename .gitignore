@@ -5,7 +5,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .coverage
-.env
 
 # Node.js
 node_modules/
@@ -22,3 +21,10 @@ Thumbs.db
 .gemini-clipboard
 .gemini/
 brain/
+
+# Sensitive files
+.env
+vital-octagon-key.json
+
+# Markdown files
+*.md

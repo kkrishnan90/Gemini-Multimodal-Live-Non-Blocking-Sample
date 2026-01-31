@@ -63,7 +63,7 @@ async def send_audio(session, audio_interface):
         while True:
             data = await asyncio.to_thread(audio_interface.read)
             await session.send_realtime_input(
-                audio=types.Blob(data=data, mime_type="audio/pcm")
+                audio=types.Blob(data=data, mime_type=config.INPUT_AUDIO_MIME_TYPE)
             )
     except asyncio.CancelledError:
         pass
